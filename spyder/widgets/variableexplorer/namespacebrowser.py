@@ -236,7 +236,149 @@ class NamespaceBrowser(QWidget):
         if properties is not None:
             self.editor.var_properties = properties
 
+    #------ Remote commands ------------------------------------
+    def get_value(self, name):
+        if self.is_ipyclient:
+            value = self.shellwidget.get_value(name)
 
+            # Reset temporal variable where value is saved to
+            # save memory
+            self.shellwidget._kernel_value = None
+        else:
+            value = monitor_get_global(self._get_sock(), name)
+        return value
+
+    def set_value(self, name, value):
+        """Set value for a variable."""
+        if self.is_ipyclient:
+            value = serialize_object(value)
+            self.shellwidget.set_value(name, value)
+        else:
+            monitor_set_global(self._get_sock(), name, value)
+        self.refresh_table()
+        
+    def remove_values(self, names):
+        for name in names:
+            if self.is_ipyclient:
+                self.shellwidget.remove_value(name)
+            else:
+                monitor_del_global(self._get_sock(), name)
+        self.refresh_table()
+        
+    def copy_value(self, orig_name, new_name):
+        if self.is_ipyclient:
+            self.shellwidget.copy_value(orig_name, new_name)
+        else:
+            monitor_copy_global(self._get_sock(), orig_name, new_name)
+        self.refresh_table()
+        
+    def is_list(self, name):
+        """Return True if variable is a list or a tuple"""
+        if self.is_ipyclient:
+            return self.var_properties[name]['is_list']
+        else:
+            return communicate(self._get_sock(),
+                               'isinstance(%s, (tuple, list))' % name)
+        
+    def is_dict(self, name):
+        """Return True if variable is a dictionary"""
+        if self.is_ipyclient:
+            return self.var_properties[name]['is_dict']
+        else:
+            return communicate(self._get_sock(), 'isinstance(%s, dict)' % name)
+        
+    def get_len(self, name):
+        """Return sequence length"""
+        if self.is_ipyclient:
+            return self.var_properties[name]['len']
+        else:
+            return communicate(self._get_sock(), "len(%s)" % name)
+        
+    def is_array(self, name):
+        """Return True if variable is a NumPy array"""
+        if self.is_ipyclient:
+            return self.var_properties[name]['is_array']
+        else:
+            return communicate(self._get_sock(), 'is_array("%s")' % name)
+        
+    def is_image(self, name):
+        """Return True if variable is a PIL.Image image"""
+        if self.is_ipyclient:
+            return self.var_properties[name]['is_image']
+        else:
+            return communicate(self._get_sock(), 'is_image("%s")' % name)
+
+    def is_data_frame(self, name):
+        """Return True if variable is a DataFrame"""
+        if self.is_ipyclient:
+            return self.var_properties[name]['is_data_frame']
+        else:
+            return communicate(self._get_sock(),
+                               "isinstance(globals()['%s'], DataFrame)" % name)
+
+    def is_series(self, name):
+        """Return True if variable is a Series"""
+        if self.is_ipyclient:
+            return self.var_properties[name]['is_series']
+        else:
+            return communicate(self._get_sock(),
+                               "isinstance(globals()['%s'], Series)" % name)
+
+    def get_array_shape(self, name):
+        """Return array's shape"""
+        if self.is_ipyclient:
+            return self.var_properties[name]['array_shape']
+        else:
+            return communicate(self._get_sock(), "%s.shape" % name)
+        
+    def get_array_ndim(self, name):
+        """Return array's ndim"""
+        if self.is_ipyclient:
+            return self.var_properties[name]['array_ndim']
+        else:
+            return communicate(self._get_sock(), "%s.ndim" % name)
+        
+    def plot(self, name, funcname):
+        if self.is_ipyclient:
+            sw = self.shellwidget
+            if sw._reading:
+                sw.dbg_exec_magic('varexp', '--%s %s' % (funcname, name))
+            else:
+                sw.execute("%%varexp --%s %s" % (funcname, name))
+        else:
+            command = "import spyder.pyplot; "\
+                  "__fig__ = spyder.pyplot.figure(); "\
+                  "__items__ = getattr(spyder.pyplot, '%s')(%s); "\
+                  "spyder.pyplot.show(); "\
+                  "del __fig__, __items__;" % (funcname, name)
+            self.shellwidget.send_to_process(command)
+        
+    def imshow(self, name):
+        if self.is_ipyclient:
+            sw = self.shellwidget
+            if sw._reading:
+                sw.dbg_exec_magic('varexp', '--imshow %s' % name)
+            else:
+                sw.execute("%%varexp --imshow %s" % name)
+        else:
+            command = "import spyder.pyplot; " \
+                  "__fig__ = spyder.pyplot.figure(); " \
+                  "__items__ = spyder.pyplot.imshow(%s); " \
+                  "spyder.pyplot.show(); del __fig__, __items__;" % name
+            self.shellwidget.send_to_process(command)
+        
+    def show_image(self, name):
+        command = "%s.show()" % name
+        if self.is_ipyclient:
+            sw = self.shellwidget
+            if sw._reading:
+                sw.kernel_client.input(command)
+            else:
+                sw.execute(command)
+        else:
+            self.shellwidget.send_to_process(command)
+
+    # ------ Set, load and save data ------------------------------------------
     def set_data(self, data):
         """Set data."""
         if data != self.editor.model.get_data():
