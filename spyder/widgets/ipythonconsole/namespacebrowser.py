@@ -15,7 +15,6 @@ from ipykernel.pickleutil import CannedObject
 from ipykernel.serialize import deserialize_object
 from qtconsole.rich_jupyter_widget import RichJupyterWidget
 
-from spyder.config.base import _
 from spyder.py3compat import to_text_string
 
 
@@ -68,16 +67,17 @@ class NamepaceBrowserWidget(RichJupyterWidget):
 
     def get_value(self, name):
         """Ask kernel for a value"""
-        # Don't ask for values while reading (ipdb) is active
+        code = u"get_ipython().kernel.get_value('%s')" % name
         if self._reading:
-            raise ValueError(_("Inspecting and setting values while debugging "
-                               "in IPython consoles is not supported yet by "
-                               "Spyder."))
+            method = self.kernel_client.input
+            code = u'!' + code
+        else:
+            method = self.silent_execute
 
         # Wait until the kernel returns the value
         wait_loop = QEventLoop()
         self.sig_got_reply.connect(wait_loop.quit)
-        self.silent_execute("get_ipython().kernel.get_value('%s')" % name)
+        method(code)
         wait_loop.exec_()
 
         # Remove loop connection and loop
@@ -96,17 +96,28 @@ class NamepaceBrowserWidget(RichJupyterWidget):
     def set_value(self, name, value):
         """Set value for a variable"""
         value = to_text_string(value)
-        self.silent_execute("get_ipython().kernel.set_value('%s', %s)" %
-                            (name, value))
+        code = u"get_ipython().kernel.set_value('%s', %s)" % (name, value)
+        if self._reading:
+            self.kernel_client.input(u'!' + code)
+        else:
+            self.silent_execute(code)
 
     def remove_value(self, name):
         """Remove a variable"""
-        self.silent_execute("get_ipython().kernel.remove_value('%s')" % name)
+        code = u"get_ipython().kernel.remove_value('%s')" % name
+        if self._reading:
+            self.kernel_client.input(u'!' + code)
+        else:
+            self.silent_execute(code)
 
     def copy_value(self, orig_name, new_name):
         """Copy a variable"""
-        self.silent_execute("get_ipython().kernel.copy_value('%s', '%s')" %
-                            (orig_name, new_name))
+        code = u"get_ipython().kernel.copy_value('%s', '%s')" % (orig_name,
+                                                                 new_name)
+        if self._reading:
+            self.kernel_client.input(u'!' + code)
+        else:
+            self.silent_execute(code)
 
     def load_data(self, filename, ext):
         # Wait until the kernel tries to load the file
